@@ -1,0 +1,8 @@
+{
+   "category": "test-category",
+   "author": "test-author",
+   "sender": "test-sender",
+   "subject": "test-subject",
+   "recipient": "test-recipient",
+   "email_content": "test-email-content"
+}

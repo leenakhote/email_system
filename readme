@@ -1,0 +1,6 @@
+Run 
+    subscriber.py for recieving request
+    run-celery.sh to process request in backend.
+
+Test: curl -X POST -d @filename.txt http://localhost:5000/ --header "Content-Type:application/json"
+filename.txt contains example data

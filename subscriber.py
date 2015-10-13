@@ -1,58 +1,53 @@
 __author__ = 'leena'
 
-import redis
-import time
-import json
-from flask import Flask
+from flask import Flask, jsonify, request
 from celery import Celery
-from emailer import email_notifier
-from flask import render_template
 from config import library as settings, celerytest as celeryconfig
-#from trials.celerytest import celery
-from trials.email_task import send_email
 
 
-r = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.DB_INDEX)
-p = r.pubsub()
-p.subscribe(settings.EMAIL_Q)
+def make_celery(app):
+    celery = Celery(app.import_name, broker=app.config['CELERY_BROKER_URL'])
+    celery.conf.update(app.config)
+    TaskBase = celery.Task
 
+    class ContextTask(TaskBase):
+        abstract = True
+
+        def __call__(self, *args, **kwargs):
+            with app.app_context():
+                return TaskBase.__call__(self, *args, **kwargs)
+
+    celery.Task = ContextTask
+    return celery
 
 app = Flask(__name__, template_folder=settings.TEMPLATE_DIR)
-
 app.config['CELERY_BROKER_URL'] = celeryconfig.BROKER_URL
 app.config['CELERY_RESULT_BACKEND'] = celeryconfig.CELERY_RESULT_BACKEND
 app.config['BROKER_TRANSPORT'] = celeryconfig.BROKER_TRANSPORT
+app.config.update(CELERY_BROKER_URL='redis://localhost:6379',
+                  CELERY_RESULT_BACKEND='redis://localhost:6379',
+                  CELERY_IMPORTS=(app.import_name,))
+
+async_celery = make_celery(app)
 
 
-celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
-celery.conf.update(app.config)
+def mailer(data):
+    from emailer import email_notifier
+    print "Mailing: %s" % data
+    category = data.get('category', None)
+    author = data.get('author', None)
+    sender = data.get('sender', None)
+    subject = data.get('subject', None)
+    recipient = data.get('recipient', None)
+    email_content = data.get('email_content', None)
+    email_notifier.delay(category, author, sender, recipient, subject,
+                         email_content=email_content)
 
 
-def subscribe_data():
-    while True:
-        message = p.get_message()
-        if message:
-            data = message.get('data')
-            print("Subscriber: %s" % data)
-            if data and type(data) is not long:
-                mail_dict = json.loads(data)
-                category = mail_dict['category']
-                author = mail_dict['author']
-                sender = mail_dict['sender']
-                subject = mail_dict['subject']
-                recipient = mail_dict['recipient']
-                email_content = mail_dict['email_content']
-
-                # Call email notifier
-                email_notifier(category, author, sender, recipient, subject, email_content=email_content)
-            time.sleep(0.5)
-
-
-@app.route("/")
+@app.route("/", methods=['POST'])
 def index():
-    send_email.delay()
-    #subscribe_data()
-    return render_template("index.html")
+    mailer(request.json)
+    return jsonify(dict(status='success'))
 
 
 if __name__ == "__main__":
